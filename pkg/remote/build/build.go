@@ -51,6 +51,8 @@ type RunOptions struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
+	AuthConfigs map[string]docker.AuthConfig
+
 	OnPod     func(ctx context.Context, client kubernetes.Client, pod *corev1.Pod) error
 	OnContext func(ctx context.Context, client kubernetes.Client, pod *corev1.Pod, path string) error
 	OnReady   func(ctx context.Context, client kubernetes.Client, pod *corev1.Pod) error
@@ -121,6 +123,25 @@ func Run(ctx context.Context, client kubernetes.Client, image Image, dir, file s
 		options.Stderr = os.Stderr
 	}
 
+	if options.AuthConfigs == nil {
+		options.AuthConfigs = map[string]docker.AuthConfig{}
+	}
+
+	if image.Username != "" && image.Password != "" {
+		registry := image.Registry
+
+		if registry == "index.docker.io" || registry == "" {
+			registry = "https://index.docker.io/v1/"
+		}
+
+		options.AuthConfigs[registry] = docker.AuthConfig{
+			Username: image.Username,
+			Password: image.Password,
+
+			Auth: base64.StdEncoding.EncodeToString([]byte(image.Username + ":" + image.Password)),
+		}
+	}
+
 	if dir == "" || dir == "." {
 		wd, err := os.Getwd()
 
@@ -189,22 +210,9 @@ func Run(ctx context.Context, client kubernetes.Client, image Image, dir, file s
 		}
 	}
 
-	if image.Username != "" && image.Password != "" {
-		registry := image.Registry
-
-		if registry == "index.docker.io" || registry == "" {
-			registry = "https://index.docker.io/v1/"
-		}
-
+	if len(options.AuthConfigs) > 0 {
 		config := docker.ConfigFile{
-			AuthConfigs: map[string]docker.AuthConfig{
-				registry: {
-					Username: image.Username,
-					Password: image.Password,
-
-					Auth: base64.StdEncoding.EncodeToString([]byte(image.Username + ":" + image.Password)),
-				},
-			},
+			AuthConfigs: options.AuthConfigs,
 		}
 
 		data, _ := json.Marshal(config)
