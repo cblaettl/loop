@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"time"
 
 	"github.com/adrianliechti/loop/pkg/kubernetes"
@@ -36,6 +37,7 @@ type Catapult struct {
 
 type CatapultOptions struct {
 	Scope      string
+	Filter     string
 	Namespaces []string
 
 	Logger *slog.Logger
@@ -186,6 +188,12 @@ func (c *Catapult) listTunnel() []*tunnel {
 	for _, service := range c.services {
 		if len(service.Spec.Selector) == 0 {
 			continue
+		}
+
+		if c.options.Filter != "" {
+			if match, err := filepath.Match(c.options.Filter, service.Name); err != nil || !match {
+				continue
+			}
 		}
 
 		pods := c.selectPods(service.Namespace, labels.SelectorFromSet(service.Spec.Selector))

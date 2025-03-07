@@ -20,6 +20,7 @@ var Command = &cli.Command{
 	Flags: []cli.Flag{
 		app.ScopeFlag,
 		app.NamespacesFlag,
+		app.FilterFlag,
 	},
 
 	Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -27,6 +28,7 @@ var Command = &cli.Command{
 
 		scope := app.Scope(ctx, cmd)
 		namespaces := app.Namespaces(ctx, cmd)
+		filter := app.Filter(ctx, cmd)
 
 		elevated, err := system.IsElevated()
 
@@ -38,11 +40,11 @@ var Command = &cli.Command{
 			cli.Fatal("This command must be run as root!")
 		}
 
-		return Connect(ctx, client, namespaces, scope)
+		return Connect(ctx, client, namespaces, scope, filter)
 	},
 }
 
-func Connect(ctx context.Context, client kubernetes.Client, namespaces []string, scope string) error {
+func Connect(ctx context.Context, client kubernetes.Client, namespaces []string, scope, filter string) error {
 	if scope == "" && len(namespaces) > 0 {
 		scope = namespaces[0]
 	}
@@ -59,6 +61,7 @@ func Connect(ctx context.Context, client kubernetes.Client, namespaces []string,
 
 	catapult, err := catapult.New(client, hostsFile, catapult.CatapultOptions{
 		Scope:      scope,
+		Filter:     filter,
 		Namespaces: namespaces,
 
 		Logger: slog.Default(),

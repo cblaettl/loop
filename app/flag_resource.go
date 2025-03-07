@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"path/filepath"
 
 	"github.com/adrianliechti/loop/pkg/cli"
 )
@@ -127,6 +128,35 @@ func MustScope(ctx context.Context, cmd *cli.Command) string {
 
 	if value == "" {
 		cli.Fatal(errors.New("scope missing"))
+	}
+
+	return value
+}
+
+var FilterFlag = &cli.StringFlag{
+	Name:  "filter",
+	Usage: "filter",
+}
+
+func Filter(ctx context.Context, cmd *cli.Command) string {
+	value := cmd.String(FilterFlag.Name)
+
+	if value == "" {
+		return ""
+	}
+
+	if _, err := filepath.Match(value, ""); err != nil {
+		cli.Fatal(errors.New("invalid filter pattern"))
+	}
+
+	return value
+}
+
+func MustFilter(ctx context.Context, cmd *cli.Command) string {
+	value := Filter(ctx, cmd)
+
+	if value == "" {
+		cli.Fatal(errors.New("filter missing"))
 	}
 
 	return value
