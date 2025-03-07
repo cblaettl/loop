@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/docker/docker/pkg/archive"
+	"github.com/docker/docker/pkg/idtools"
 	"github.com/google/go-containerregistry/pkg/name"
 
 	corev1 "k8s.io/api/core/v1"
@@ -134,7 +135,12 @@ func Run(ctx context.Context, client kubernetes.Client, image Image, dir, file s
 		file = "Dockerfile"
 	}
 
-	f, err := archive.TarWithOptions(dir, &archive.TarOptions{})
+	f, err := archive.TarWithOptions(dir, &archive.TarOptions{
+		ChownOpts: &idtools.Identity{
+			UID: 1000,
+			GID: 1000,
+		},
+	})
 
 	if err != nil {
 		return err
