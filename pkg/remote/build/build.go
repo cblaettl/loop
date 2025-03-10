@@ -18,8 +18,6 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/uuid"
 
-	"github.com/docker/docker/pkg/archive"
-	"github.com/docker/docker/pkg/idtools"
 	"github.com/google/go-containerregistry/pkg/name"
 
 	corev1 "k8s.io/api/core/v1"
@@ -50,6 +48,8 @@ type RunOptions struct {
 
 	Stdout io.Writer
 	Stderr io.Writer
+
+	AuthConfigs map[string]docker.AuthConfig
 
 	OnPod     func(ctx context.Context, client kubernetes.Client, pod *corev1.Pod) error
 	OnContext func(ctx context.Context, client kubernetes.Client, pod *corev1.Pod, path string) error
@@ -121,6 +121,28 @@ func Run(ctx context.Context, client kubernetes.Client, image Image, dir, file s
 		options.Stderr = os.Stderr
 	}
 
+	if options.AuthConfigs == nil {
+		options.AuthConfigs = map[string]docker.AuthConfig{}
+	}
+
+	uid := 1000
+	gid := 1000
+
+	if image.Username != "" && image.Password != "" {
+		registry := image.Registry
+
+		if registry == "index.docker.io" || registry == "" {
+			registry = "https://index.docker.io/v1/"
+		}
+
+		options.AuthConfigs[registry] = docker.AuthConfig{
+			Username: image.Username,
+			Password: image.Password,
+
+			Auth: base64.StdEncoding.EncodeToString([]byte(image.Username + ":" + image.Password)),
+		}
+	}
+
 	if dir == "" || dir == "." {
 		wd, err := os.Getwd()
 
@@ -133,17 +155,6 @@ func Run(ctx context.Context, client kubernetes.Client, image Image, dir, file s
 
 	if file == "" {
 		file = "Dockerfile"
-	}
-
-	f, err := archive.TarWithOptions(dir, &archive.TarOptions{
-		ChownOpts: &idtools.Identity{
-			UID: 1000,
-			GID: 1000,
-		},
-	})
-
-	if err != nil {
-		return err
 	}
 
 	pod := templatePod(ctx, client, options)
@@ -175,11 +186,22 @@ func Run(ctx context.Context, client kubernetes.Client, image Image, dir, file s
 	builderContext := builderPath
 	builderDockerfile := path.Dir(path.Join(builderPath, file))
 
+	r, w := io.Pipe()
+
+	go func() {
+		defer w.Close()
+
+		docker.WriteTarball(w, dir, &docker.TarballOptions{
+			UID: &uid,
+			GID: &gid,
+		})
+	}()
+
 	if err := client.PodExec(ctx, pod.Namespace, pod.Name, container, []string{"mkdir", "-p", builderPath}, false, nil, options.Stdout, options.Stderr); err != nil {
 		return err
 	}
 
-	if err := client.PodExec(ctx, pod.Namespace, pod.Name, container, []string{"tar", "xf", "-", "-C", builderPath}, false, f, options.Stdout, options.Stderr); err != nil {
+	if err := client.PodExec(ctx, pod.Namespace, pod.Name, container, []string{"tar", "xmf", "-", "-C", builderPath}, false, r, options.Stdout, options.Stderr); err != nil {
 		return err
 	}
 
@@ -189,22 +211,9 @@ func Run(ctx context.Context, client kubernetes.Client, image Image, dir, file s
 		}
 	}
 
-	if image.Username != "" && image.Password != "" {
-		registry := image.Registry
-
-		if registry == "index.docker.io" || registry == "" {
-			registry = "https://index.docker.io/v1/"
-		}
-
+	if len(options.AuthConfigs) > 0 {
 		config := docker.ConfigFile{
-			AuthConfigs: map[string]docker.AuthConfig{
-				registry: {
-					Username: image.Username,
-					Password: image.Password,
-
-					Auth: base64.StdEncoding.EncodeToString([]byte(image.Username + ":" + image.Password)),
-				},
-			},
+			AuthConfigs: options.AuthConfigs,
 		}
 
 		data, _ := json.Marshal(config)
@@ -246,7 +255,7 @@ func Run(ctx context.Context, client kubernetes.Client, image Image, dir, file s
 		"--output", strings.Join(output, ","),
 	}
 
-	return client.PodExec(ctx, pod.Namespace, pod.Name, container, build, false, f, options.Stdout, options.Stderr)
+	return client.PodExec(ctx, pod.Namespace, pod.Name, container, build, false, nil, options.Stdout, options.Stderr)
 }
 
 func templatePod(ctx context.Context, client kubernetes.Client, options *RunOptions) *corev1.Pod {

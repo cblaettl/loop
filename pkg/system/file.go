@@ -21,6 +21,10 @@ func (a *AtomicFile) ReadAll() ([]byte, error) {
 	file, err := os.Open(a.path)
 
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []byte{}, nil
+		}
+
 		return nil, err
 	}
 
